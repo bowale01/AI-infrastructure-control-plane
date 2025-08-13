@@ -1,0 +1,499 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AI Agents Infrastructure - Main Stack'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: development
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  ProjectName:
+    Type: String
+    Default: ai-agents
+    Description: Project name for resource naming
+  
+  VpcId:
+    Type: String
+    Description: VPC ID for deployment (optional)
+    Default: ''
+  
+  SubnetIds:
+    Type: CommaDelimitedList
+    Description: Subnet IDs for deployment (optional)
+    Default: ''
+
+Conditions:
+  UseVPC: !Not [!Equals [!Ref VpcId, '']]
+
+Resources:
+  # IAM Role for Lambda Functions
+  AIAgentsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-execution-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: AIAgentsCustomPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:PutMetricData
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:DescribeAlarms
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:DescribePolicies
+                  - autoscaling:PutScalingPolicy
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:DescribeClusters
+                  - ecs:DescribeTasks
+                  - lambda:GetFunction
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:GetProvisionedConcurrencyConfig
+                  - lambda:PutProvisionedConcurrencyConfig
+                  - events:PutEvents
+                  - events:PutRule
+                  - events:PutTargets
+                  - sns:Publish
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:PutParameter
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: '*'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # CloudWatch Log Group
+  AIAgentsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-${Environment}'
+      RetentionInDays: 14
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # EventBridge Custom Bus
+  AIAgentsEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub '${ProjectName}-event-bus-${Environment}'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # EventBridge Rules for CloudWatch Alarms
+  CloudWatchAlarmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-cloudwatch-alarms-${Environment}'
+      Description: 'Rule for CloudWatch alarm state changes'
+      EventBusName: !Ref AIAgentsEventBus
+      EventPattern:
+        source: ['aws.cloudwatch']
+        detail-type: ['CloudWatch Alarm State Change']
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ScalingEventQueue.Arn
+          Id: 'CloudWatchAlarmTarget'
+          SqsParameters:
+            MessageGroupId: 'cloudwatch-alarms'
+
+  # EventBridge Rules for Auto Scaling Events
+  AutoScalingRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-autoscaling-events-${Environment}'
+      Description: 'Rule for Auto Scaling events'
+      EventBusName: !Ref AIAgentsEventBus
+      EventPattern:
+        source: ['aws.autoscaling']
+        detail-type: 
+          - 'EC2 Instance Launch Successful'
+          - 'EC2 Instance Terminate Successful'
+          - 'EC2 Instance Launch Unsuccessful'
+          - 'EC2 Instance Terminate Unsuccessful'
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ScalingEventQueue.Arn
+          Id: 'AutoScalingEventTarget'
+          SqsParameters:
+            MessageGroupId: 'autoscaling-events'
+
+  # SQS Queue for Scaling Events
+  ScalingEventQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-scaling-events-${Environment}.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeoutSeconds: 300
+      MessageRetentionPeriod: 1209600  # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # SQS Queue for Recovery Events
+  RecoveryEventQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-recovery-events-${Environment}.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeoutSeconds: 600
+      MessageRetentionPeriod: 1209600  # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Dead Letter Queue
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-dlq-${Environment}.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      MessageRetentionPeriod: 1209600  # 14 days
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # SNS Topic for Alerts
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-alerts-${Environment}'
+      DisplayName: 'AI Agents Alerts'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # SNS Topic for Notifications
+  NotificationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-notifications-${Environment}'
+      DisplayName: 'AI Agents Notifications'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # DynamoDB Table for State Management
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-state-${Environment}'
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # S3 Bucket for Configuration Backup
+  ConfigBackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-config-backup-${Environment}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Systems Manager Parameters
+  ScalingThresholdsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/${Environment}/scaling-thresholds'
+      Type: StringList
+      Value: '70,80,30,20'
+      Description: 'CPU utilization thresholds for scaling decisions'
+      Tags:
+        Environment: !Ref Environment
+        Project: !Ref ProjectName
+
+  NotificationSettingsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/${Environment}/notification-settings'
+      Type: String
+      Value: !Sub |
+        {
+          "email_enabled": false,
+          "slack_enabled": false,
+          "sns_topic_arn": "${AlertsTopic}"
+        }
+      Description: 'Notification configuration for AI agents'
+      Tags:
+        Environment: !Ref Environment
+        Project: !Ref ProjectName
+
+  # Lambda Function for Scaling Agent
+  ScalingAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-scaling-agent-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_handler.scaling_agent_handler
+      Code:
+        ZipFile: |
+          import json
+          def scaling_agent_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Scaling Agent Handler - Replace with actual code')
+              }
+      Role: !GetAtt AIAgentsExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          PROJECT_NAME: !Ref ProjectName
+          STATE_TABLE: !Ref StateTable
+          ALERTS_TOPIC: !Ref AlertsTopic
+          LOG_LEVEL: INFO
+      VpcConfig: !If
+        - UseVPC
+        - SecurityGroupIds: 
+            - !Ref LambdaSecurityGroup
+          SubnetIds: !Ref SubnetIds
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Lambda Function for Recovery Agent
+  RecoveryAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-recovery-agent-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_handler.recovery_agent_handler
+      Code:
+        ZipFile: |
+          import json
+          def recovery_agent_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Recovery Agent Handler - Replace with actual code')
+              }
+      Role: !GetAtt AIAgentsExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          PROJECT_NAME: !Ref ProjectName
+          STATE_TABLE: !Ref StateTable
+          ALERTS_TOPIC: !Ref AlertsTopic
+          LOG_LEVEL: INFO
+      VpcConfig: !If
+        - UseVPC
+        - SecurityGroupIds: 
+            - !Ref LambdaSecurityGroup
+          SubnetIds: !Ref SubnetIds
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Lambda Security Group (only if VPC is used)
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: UseVPC
+    Properties:
+      GroupDescription: Security group for AI Agents Lambda functions
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-lambda-sg-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # CloudWatch Dashboard
+  AIAgentsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${ProjectName}-${Environment}'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${ScalingAgentFunction}" ],
+                  [ ".", "Invocations", ".", "." ],
+                  [ ".", "Errors", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Scaling Agent Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${RecoveryAgentFunction}" ],
+                  [ ".", "Invocations", ".", "." ],
+                  [ ".", "Errors", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Recovery Agent Metrics"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ExecutionRoleArn:
+    Description: ARN of the execution role
+    Value: !GetAtt AIAgentsExecutionRole.Arn
+    Export:
+      Name: !Sub '${ProjectName}-execution-role-${Environment}'
+
+  EventBusArn:
+    Description: ARN of the custom event bus
+    Value: !GetAtt AIAgentsEventBus.Arn
+    Export:
+      Name: !Sub '${ProjectName}-event-bus-${Environment}'
+
+  ScalingEventQueueUrl:
+    Description: URL of the scaling events queue
+    Value: !Ref ScalingEventQueue
+    Export:
+      Name: !Sub '${ProjectName}-scaling-queue-${Environment}'
+
+  RecoveryEventQueueUrl:
+    Description: URL of the recovery events queue
+    Value: !Ref RecoveryEventQueue
+    Export:
+      Name: !Sub '${ProjectName}-recovery-queue-${Environment}'
+
+  AlertsTopicArn:
+    Description: ARN of the alerts SNS topic
+    Value: !Ref AlertsTopic
+    Export:
+      Name: !Sub '${ProjectName}-alerts-topic-${Environment}'
+
+  StateTableName:
+    Description: Name of the DynamoDB state table
+    Value: !Ref StateTable
+    Export:
+      Name: !Sub '${ProjectName}-state-table-${Environment}'
+
+  ScalingAgentFunctionArn:
+    Description: ARN of the scaling agent Lambda function
+    Value: !GetAtt ScalingAgentFunction.Arn
+    Export:
+      Name: !Sub '${ProjectName}-scaling-function-${Environment}'
+
+  RecoveryAgentFunctionArn:
+    Description: ARN of the recovery agent Lambda function
+    Value: !GetAtt RecoveryAgentFunction.Arn
+    Export:
+      Name: !Sub '${ProjectName}-recovery-function-${Environment}'

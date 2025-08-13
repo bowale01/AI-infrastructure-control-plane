@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AI Agents Infrastructure - Simplified Stack'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: development
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  ProjectName:
+    Type: String
+    Default: ai-agents
+    Description: Project name for resource naming
+
+Resources:
+  # IAM Role for Lambda Functions (simplified)
+  AIAgentsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-execution-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BasicAIAgentsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - cloudwatch:PutMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                Resource: '*'
+
+  # Lambda function for scaling agent
+  ScalingAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-scaling-agent-${Environment}'
+      Runtime: python3.9
+      Handler: src/main.lambda_handler
+      Role: !GetAtt AIAgentsExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          def lambda_handler(event, context):
+              logger.info(f"AI Agents Lambda triggered with event: {json.dumps(event)}")
+              
+              # Basic response
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': 'AI Agents system is running',
+                      'environment': context.function_name,
+                      'event': event
+                  })
+              }
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          PROJECT_NAME: !Ref ProjectName
+
+  # CloudWatch Log Group
+  AIAgentsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-scaling-agent-${Environment}'
+      RetentionInDays: 14
+
+  # Lambda permission for manual invocation
+  ScalingAgentInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScalingAgentFunction
+      Action: lambda:InvokeFunction
+      Principal: !Ref AWS::AccountId
+
+Outputs:
+  StackName:
+    Description: 'CloudFormation Stack Name'
+    Value: !Ref AWS::StackName
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-stack-name'
+
+  LambdaFunctionArn:
+    Description: 'Scaling Agent Lambda Function ARN'
+    Value: !GetAtt ScalingAgentFunction.Arn
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-lambda-arn'
+
+  LambdaFunctionName:
+    Description: 'Scaling Agent Lambda Function Name'
+    Value: !Ref ScalingAgentFunction
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-lambda-name'
+
+  ExecutionRoleArn:
+    Description: 'Lambda Execution Role ARN'
+    Value: !GetAtt AIAgentsExecutionRole.Arn
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-execution-role-arn'
+
+  LogGroupName:
+    Description: 'CloudWatch Log Group Name'
+    Value: !Ref AIAgentsLogGroup
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-log-group-name'

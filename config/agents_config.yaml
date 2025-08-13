@@ -1,0 +1,196 @@
+# AI Agents Configuration
+
+# Agent configurations
+agents:
+  scaling_agent:
+    name: "scaling_agent"
+    enabled: true
+    execution_interval: 60  # seconds
+    retry_attempts: 3
+    timeout: 300  # seconds
+    metrics_enabled: true
+    log_level: "INFO"
+    
+    # Scaling-specific configuration
+    scaling_targets:
+      - resource_type: "ec2"
+        resource_id: "my-auto-scaling-group"
+        min_capacity: 2
+        max_capacity: 20
+        scaling_rules:
+          - metric_name: "cpu_utilization"
+            threshold: 80.0
+            comparison: ">="
+            scale_direction: "up"
+            scale_amount: 2
+            cooldown_period: 300
+          - metric_name: "cpu_utilization"
+            threshold: 30.0
+            comparison: "<="
+            scale_direction: "down"
+            scale_amount: 1
+            cooldown_period: 600
+      
+      - resource_type: "ecs"
+        resource_id: "my-ecs-service"
+        min_capacity: 1
+        max_capacity: 10
+        scaling_rules:
+          - metric_name: "cpu_utilization"
+            threshold: 70.0
+            comparison: ">="
+            scale_direction: "up"
+            scale_amount: 1
+            cooldown_period: 300
+          - metric_name: "memory_utilization"
+            threshold: 80.0
+            comparison: ">="
+            scale_direction: "up"
+            scale_amount: 1
+            cooldown_period: 300
+
+  recovery_agent:
+    name: "recovery_agent"
+    enabled: true
+    execution_interval: 30  # seconds
+    retry_attempts: 5
+    timeout: 600  # seconds
+    metrics_enabled: true
+    log_level: "INFO"
+    
+    # Recovery-specific configuration
+    monitoring_targets:
+      - resource_type: "ec2"
+        resource_ids: ["i-1234567890abcdef0", "i-0987654321fedcba0"]
+        health_checks:
+          - type: "instance_status"
+            interval: 30
+          - type: "system_status"
+            interval: 60
+          - type: "application_health"
+            interval: 120
+            endpoint: "/health"
+    
+    recovery_actions:
+      instance_failure:
+        - action: "restart_instance"
+          max_attempts: 3
+        - action: "replace_instance"
+          condition: "restart_failed"
+      service_failure:
+        - action: "restart_service"
+          max_attempts: 2
+        - action: "failover_to_backup"
+          condition: "service_unresponsive"
+
+  diagnostics_agent:
+    name: "diagnostics_agent"
+    enabled: true
+    execution_interval: 120  # seconds
+    retry_attempts: 2
+    timeout: 180  # seconds
+    metrics_enabled: true
+    log_level: "INFO"
+    
+    # Diagnostics-specific configuration
+    monitoring_scope:
+      - namespace: "AWS/EC2"
+        metrics: ["CPUUtilization", "NetworkIn", "NetworkOut", "DiskReadOps", "DiskWriteOps"]
+      - namespace: "AWS/ELB"
+        metrics: ["RequestCount", "LatencyHigh", "HTTPCode_Target_2XX_Count"]
+      - namespace: "AWS/RDS"
+        metrics: ["CPUUtilization", "DatabaseConnections", "ReadLatency", "WriteLatency"]
+    
+    anomaly_detection:
+      enabled: true
+      sensitivity: "medium"  # low, medium, high
+      lookback_hours: 24
+      alert_threshold: 0.7  # confidence threshold for anomalies
+
+# Control Plane Configuration
+control_plane:
+  orchestration:
+    mode: "parallel"  # sequential, parallel, priority_based
+    max_concurrent_agents: 5
+    execution_timeout: 1800  # seconds
+    health_check_interval: 300  # seconds
+    retry_failed_agents: true
+    max_retries: 3
+  
+  agent_priorities:
+    recovery_agent: 10  # highest priority
+    scaling_agent: 5
+    diagnostics_agent: 1
+  
+  dependencies:
+    scaling_agent: ["diagnostics_agent"]  # scaling depends on diagnostics
+
+# Event Processing Configuration
+event_processing:
+  cloudwatch:
+    enabled: true
+    alarm_processing: true
+    metric_processing: true
+    
+  eventbridge:
+    enabled: true
+    rules:
+      - name: "scaling-events"
+        event_pattern:
+          source: ["aws.autoscaling"]
+          detail-type: ["EC2 Instance Launch Successful", "EC2 Instance Terminate Successful"]
+      - name: "alarm-events"
+        event_pattern:
+          source: ["aws.cloudwatch"]
+          detail-type: ["CloudWatch Alarm State Change"]
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "json"  # json, console
+  console_enabled: true
+  file_enabled: false
+  file_path: "/var/log/ai-agents.log"
+  
+  cloudwatch_logs:
+    enabled: false
+    log_group: "/aws/lambda/ai-agents"
+    log_stream: "main"
+
+# Metrics Configuration
+metrics:
+  enabled: true
+  prometheus:
+    enabled: true
+    port: 8080
+    path: "/metrics"
+  
+  cloudwatch:
+    enabled: true
+    namespace: "AIAgents"
+    
+  custom_metrics:
+    - name: "agent_decision_accuracy"
+      type: "gauge"
+      description: "Accuracy of agent decisions"
+    - name: "cost_optimization_savings"
+      type: "counter"
+      description: "Cost savings achieved through optimization"
+
+# Notification Configuration
+notifications:
+  sns:
+    enabled: false
+    topic_arn: "arn:aws:sns:us-east-1:123456789012:ai-agents-alerts"
+    
+  slack:
+    enabled: false
+    webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    channel: "#infrastructure-alerts"
+    
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    from_email: "ai-agents@company.com"
+    to_emails: ["admin@company.com"]

@@ -1,0 +1,234 @@
+# AWS Configuration for AI Agents
+
+# AWS Account and Region Configuration
+aws:
+  region: "us-east-1"
+  account_id: "123456789012"  # Replace with your AWS account ID
+  
+  # AWS Credentials (use IAM roles in production)
+  credentials:
+    # For local development, use AWS CLI profiles
+    profile: "default"
+    
+    # For Lambda/ECS deployment, use IAM roles
+    role_arn: "arn:aws:iam::123456789012:role/AIAgentsExecutionRole"
+
+# Service-specific configurations
+services:
+  # Auto Scaling Configuration
+  autoscaling:
+    default_cooldown: 300
+    health_check_grace_period: 300
+    health_check_type: "EC2"  # EC2 or ELB
+    
+  # CloudWatch Configuration
+  cloudwatch:
+    metrics:
+      retention_days: 30
+      detailed_monitoring: true
+    
+    alarms:
+      default_period: 300
+      default_evaluation_periods: 2
+      default_datapoints_to_alarm: 2
+    
+    logs:
+      retention_days: 14
+      
+  # EventBridge Configuration
+  eventbridge:
+    custom_bus_name: "ai-agents-event-bus"
+    rules:
+      max_targets_per_rule: 5
+      
+  # Lambda Configuration (for serverless deployment)
+  lambda:
+    runtime: "python3.9"
+    timeout: 900  # 15 minutes
+    memory_size: 512  # MB
+    
+    environment_variables:
+      LOG_LEVEL: "INFO"
+      METRICS_ENABLED: "true"
+      
+  # ECS Configuration (for containerized deployment)
+  ecs:
+    cluster_name: "ai-agents-cluster"
+    task_definition_family: "ai-agents"
+    
+    task_definition:
+      cpu: 512
+      memory: 1024
+      network_mode: "awsvpc"
+      
+  # SNS Configuration
+  sns:
+    topics:
+      alerts: "ai-agents-alerts"
+      notifications: "ai-agents-notifications"
+      
+  # SQS Configuration
+  sqs:
+    queues:
+      scaling_events: "ai-agents-scaling-events"
+      recovery_events: "ai-agents-recovery-events"
+      dead_letter: "ai-agents-dlq"
+    
+    visibility_timeout: 300
+    message_retention_period: 1209600  # 14 days
+    
+  # Systems Manager Configuration
+  ssm:
+    parameter_store_prefix: "/ai-agents/"
+    
+    parameters:
+      - name: "scaling-thresholds"
+        type: "StringList"
+        description: "CPU utilization thresholds for scaling"
+      - name: "notification-settings"
+        type: "String"
+        description: "Notification configuration"
+
+# Resource Tagging Strategy
+tagging:
+  required_tags:
+    - key: "Environment"
+      values: ["development", "staging", "production"]
+    - key: "Project"
+      value: "ai-agents"
+    - key: "Owner"
+      value: "infrastructure-team"
+    - key: "CostCenter"
+      value: "engineering"
+  
+  auto_scaling_groups:
+    - key: "AutoScalingGroup"
+      value: "ai-managed"
+    - key: "ScalingPolicy"
+      value: "intelligent"
+      
+  lambda_functions:
+    - key: "Function"
+      value: "ai-agent"
+    - key: "Runtime"
+      value: "python3.9"
+
+# Security Configuration
+security:
+  # IAM Role and Policy Configuration
+  iam:
+    execution_role:
+      name: "AIAgentsExecutionRole"
+      policies:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - "arn:aws:iam::aws:policy/CloudWatchFullAccess"
+        - "arn:aws:iam::aws:policy/AutoScalingFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonECS_FullAccess"
+        
+    custom_policies:
+      - name: "AIAgentsCustomPolicy"
+        version: "2012-10-17"
+        statement:
+          - effect: "Allow"
+            actions:
+              - "cloudwatch:GetMetricStatistics"
+              - "cloudwatch:PutMetricData"
+              - "cloudwatch:ListMetrics"
+              - "autoscaling:DescribeAutoScalingGroups"
+              - "autoscaling:UpdateAutoScalingGroup"
+              - "ecs:DescribeServices"
+              - "ecs:UpdateService"
+              - "lambda:GetFunction"
+              - "lambda:UpdateFunctionConfiguration"
+              - "events:PutEvents"
+              - "sns:Publish"
+              - "sqs:SendMessage"
+              - "sqs:ReceiveMessage"
+              - "sqs:DeleteMessage"
+            resources: "*"
+  
+  # VPC Configuration for private deployment
+  vpc:
+    enabled: false  # Set to true for VPC deployment
+    vpc_id: "vpc-12345678"
+    subnet_ids:
+      - "subnet-12345678"
+      - "subnet-87654321"
+    security_group_ids:
+      - "sg-12345678"
+
+# Cost Management
+cost_management:
+  budgets:
+    monthly_limit: 500  # USD
+    alerts:
+      - threshold: 80  # percentage
+        type: "ACTUAL"
+      - threshold: 100
+        type: "FORECASTED"
+        
+  cost_allocation_tags:
+    - "Environment"
+    - "Project"
+    - "Owner"
+
+# Monitoring and Alerting
+monitoring:
+  cloudwatch_dashboards:
+    - name: "AI-Agents-Overview"
+      widgets:
+        - type: "metric"
+          metrics:
+            - namespace: "AIAgents"
+              metric_name: "AgentExecutionCount"
+            - namespace: "AIAgents"
+              metric_name: "ScalingActionsCount"
+        
+    - name: "AI-Agents-Performance"
+      widgets:
+        - type: "metric"
+          metrics:
+            - namespace: "AIAgents"
+              metric_name: "ExecutionDuration"
+            - namespace: "AIAgents"
+              metric_name: "ErrorRate"
+  
+  custom_metrics:
+    namespace: "AIAgents"
+    metrics:
+      - name: "AgentExecutionCount"
+        unit: "Count"
+      - name: "ScalingActionsCount"
+        unit: "Count"
+      - name: "ExecutionDuration"
+        unit: "Seconds"
+      - name: "ErrorRate"
+        unit: "Percent"
+
+# Backup and Recovery
+backup:
+  configuration_backup:
+    enabled: true
+    s3_bucket: "ai-agents-config-backup"
+    backup_schedule: "daily"
+    retention_days: 30
+    
+  state_backup:
+    enabled: true
+    dynamodb_table: "ai-agents-state"
+    point_in_time_recovery: true
+
+# Development and Testing
+development:
+  local_testing:
+    localstack:
+      enabled: false
+      endpoint_url: "http://localhost:4566"
+      
+  mocking:
+    aws_services: true
+    external_apis: true
+    
+  debugging:
+    enable_debug_logs: false
+    save_execution_traces: false
