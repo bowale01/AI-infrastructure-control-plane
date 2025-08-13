@@ -1,52 +1,55 @@
 """
-Scaling Agent for intelligent auto-scaling based on metrics and predictions.
+Adaptive Resource Scaling Agent for Dynamic Infrastructure Management
+Custom implementation for intelligent AWS resource optimization
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 import boto3
 from pydantic import BaseModel, Field
 
-from .base_agent import BaseAgent, AgentConfig
+from .base_agent import InfrastructureAgent, InfraAgentConfig
 from ..utils.aws_client import AWSClientManager
 
 
-class ScalingRule(BaseModel):
-    """Configuration for a scaling rule."""
+class ResourceThreshold(BaseModel):
+    """Defines conditions for triggering scaling operations."""
     
-    metric_name: str
-    threshold: float
-    comparison: str = Field(pattern="^(>|<|>=|<=|==)$")
-    scale_direction: str = Field(pattern="^(up|down)$")
-    scale_amount: int = Field(gt=0)
-    cooldown_period: int = Field(default=300, description="Cooldown period in seconds")
+    metric_identifier: str
+    trigger_value: float
+    comparison_operator: str = Field(pattern="^(greater_than|less_than|equals|not_equals)$")
+    scaling_direction: str = Field(pattern="^(scale_out|scale_in)$")
+    adjustment_size: int = Field(gt=0)
+    stabilization_period: int = Field(default=300, description="Wait time between scaling actions")
 
 
-class ScalingTarget(BaseModel):
-    """Target resource for scaling operations."""
+class ManagedResource(BaseModel):
+    """Represents an AWS resource under agent management."""
     
-    resource_type: str  # "ec2", "ecs", "lambda", etc.
-    resource_id: str
-    min_capacity: int = Field(ge=0)
-    max_capacity: int = Field(gt=0)
-    current_capacity: Optional[int] = None
-    scaling_rules: List[ScalingRule] = Field(default_factory=list)
-    last_scaling_action: Optional[datetime] = None
+    service_type: str  # "auto_scaling_group", "ecs_service", "lambda_function"
+    resource_identifier: str
+    minimum_instances: int = Field(ge=0)
+    maximum_instances: int = Field(gt=0)
+    active_instances: Optional[int] = None
+    threshold_rules: List[ResourceThreshold] = Field(default_factory=list)
+    previous_scaling_time: Optional[datetime] = None
 
 
-class ScalingAgent(BaseAgent):
+class AdaptiveScalingAgent(InfrastructureAgent):
     """
-    AI agent for intelligent auto-scaling based on metrics and predictions.
+    Intelligent resource scaling agent that automatically adjusts AWS infrastructure
+    based on real-time metrics and predictive analysis.
     """
     
-    def __init__(self, config: AgentConfig, aws_client_manager: AWSClientManager):
+    def __init__(self, config: InfraAgentConfig, aws_client_manager: AWSClientManager):
         """
-        Initialize the scaling agent.
+        Initialize the adaptive scaling agent.
         
         Args:
-            config: Agent configuration
-            aws_client_manager: AWS client manager instance
+            config: Agent configuration parameters
+            aws_client_manager: AWS service client manager
         """
         super().__init__(config, aws_client_manager)
         self.scaling_targets: List[ScalingTarget] = []

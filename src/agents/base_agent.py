@@ -1,11 +1,13 @@
 """
-Base AI Agent class providing common functionality for all agents.
+Foundational Infrastructure Agent Framework
+Custom implementation for autonomous AWS resource management
 """
 import asyncio
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+import uuid
 
 import boto3
 import structlog
@@ -15,48 +17,49 @@ from ..utils.aws_client import AWSClientManager
 from ..utils.metrics import MetricsCollector
 
 
-class AgentConfig(BaseModel):
-    """Configuration for AI agents."""
-    
-    name: str
-    enabled: bool = True
-    execution_interval: int = Field(default=60, description="Execution interval in seconds")
-    retry_attempts: int = Field(default=3, description="Number of retry attempts")
-    timeout: int = Field(default=300, description="Timeout in seconds")
-    metrics_enabled: bool = True
-    log_level: str = "INFO"
-
-
-class AgentMetadata(BaseModel):
-    """Metadata for agent execution."""
+class InfraAgentConfig(BaseModel):
+    """Configuration schema for infrastructure automation agents."""
     
     agent_name: str
-    execution_id: str
-    start_time: datetime
-    end_time: Optional[datetime] = None
-    status: str = "running"
-    error_message: Optional[str] = None
-    metrics: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+    run_frequency: int = Field(default=60, description="How often agent runs in seconds")
+    max_retry_count: int = Field(default=3, description="Maximum retry attempts on failure")
+    execution_timeout: int = Field(default=300, description="Maximum execution time in seconds")
+    collect_metrics: bool = True
+    logging_level: str = "INFO"
 
 
-class BaseAgent(ABC):
+class AgentExecutionRecord(BaseModel):
+    """Records details of each agent execution cycle."""
+    
+    agent_identifier: str
+    run_id: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    execution_status: str = "in_progress"
+    failure_reason: Optional[str] = None
+    collected_metrics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class InfrastructureAgent(ABC):
     """
-    Base class for all AI agents providing common functionality.
+    Foundation class for autonomous infrastructure management agents.
+    Provides standardized lifecycle and monitoring capabilities.
     """
     
-    def __init__(self, config: AgentConfig, aws_client_manager: AWSClientManager):
+    def __init__(self, config: InfraAgentConfig, aws_client_manager: AWSClientManager):
         """
-        Initialize the base agent.
+        Initialize the infrastructure automation agent.
         
         Args:
-            config: Agent configuration
-            aws_client_manager: AWS client manager instance
+            config: Agent configuration settings
+            aws_client_manager: AWS service client manager
         """
         self.config = config
         self.aws_clients = aws_client_manager
-        self.metrics = MetricsCollector(enabled=config.metrics_enabled)
+        self.metrics = MetricsCollector(enabled=config.collect_metrics)
         
-        # Configure structured logging
+        # Setup structured logging with custom format
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,
@@ -71,30 +74,33 @@ class BaseAgent(ABC):
             cache_logger_on_first_use=True,
         )
         
-        self.logger = structlog.get_logger(self.config.name)
-        self.logger.setLevel(getattr(logging, self.config.log_level))
+        self.logger = structlog.get_logger(self.config.agent_name)
+        self.logger.setLevel(getattr(logging, self.config.logging_level))
         
-        self._running = False
-        self._execution_count = 0
+        self._is_operational = False
+        self._total_executions = 0
+        self._current_run_id = None
     
     @abstractmethod
-    async def analyze(self) -> Dict[str, Any]:
+    async def assess_infrastructure(self) -> Dict[str, Any]:
         """
-        Analyze current state and determine if action is needed.
+        Evaluate current infrastructure state and identify optimization opportunities.
         
         Returns:
-            Dictionary containing analysis results
+            Dictionary containing infrastructure assessment data
         """
         pass
     
     @abstractmethod
-    async def decide(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
+    async def determine_actions(self, assessment: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Make decisions based on analysis results.
+        Generate action plan based on infrastructure assessment.
         
         Args:
-            analysis: Results from the analyze phase
+            assessment: Results from infrastructure evaluation
             
+        Returns:
+            Dictionary containing planned actions and their priorities
         Returns:
             Dictionary containing decisions to execute
         """

@@ -1,33 +1,35 @@
 """
-Control Plane Orchestrator for managing AI agents and coordinating their execution.
+Infrastructure Management Orchestrator
+Custom coordination system for autonomous AWS resource agents
 """
 import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Type
 from enum import Enum
+import uuid
 
 from pydantic import BaseModel, Field
 
-from ..agents.base_agent import BaseAgent, AgentConfig, AgentMetadata
-from ..agents.scaling_agent import ScalingAgent
+from ..agents.base_agent import InfrastructureAgent, InfraAgentConfig, AgentExecutionRecord
+from ..agents.scaling_agent import AdaptiveScalingAgent
 from ..utils.aws_client import AWSClientManager
 from ..utils.metrics import MetricsCollector
 from ..utils.logging_config import ContextualLogger
 
 
-class OrchestrationMode(str, Enum):
-    """Orchestration execution modes."""
-    SEQUENTIAL = "sequential"
-    PARALLEL = "parallel"
-    PRIORITY_BASED = "priority_based"
+class CoordinationStrategy(str, Enum):
+    """Available agent coordination strategies."""
+    SEQUENTIAL_EXECUTION = "sequential_execution"
+    CONCURRENT_EXECUTION = "concurrent_execution" 
+    PRIORITY_DRIVEN = "priority_driven"
 
 
-class AgentRegistration(BaseModel):
-    """Registration information for an agent."""
+class RegisteredAgent(BaseModel):
+    """Information about a registered infrastructure agent."""
     
-    agent_class: str
-    config: AgentConfig
-    priority: int = Field(default=1, description="Agent priority (higher = more important)")
+    agent_class_name: str
+    agent_configuration: InfraAgentConfig
+    execution_priority: int = Field(default=1, description="Agent execution priority (higher values run first)")
     enabled: bool = True
     dependencies: List[str] = Field(default_factory=list, description="Agent dependencies")
 

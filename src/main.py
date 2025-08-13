@@ -1,5 +1,5 @@
 """
-Main application entry point for AI Agents.
+Main application entry point for Infrastructure Automation Agents.
 """
 import asyncio
 import signal
@@ -10,21 +10,21 @@ from typing import Any, Dict, Optional
 import yaml
 from pydantic import ValidationError
 
-from src.agents.scaling_agent import ScalingAgent, ScalingTarget, ScalingRule
+from src.agents.scaling_agent import AdaptiveScalingAgent, ManagedResource, ResourceThreshold
 from src.control_plane.orchestrator import (
-    ControlPlaneOrchestrator, 
-    OrchestrationConfig, 
-    OrchestrationMode
+    InfrastructureOrchestrator, 
+    OrchestrationConfiguration, 
+    CoordinationStrategy
 )
-from src.agents.base_agent import AgentConfig
+from src.agents.base_agent import InfraAgentConfig
 from src.utils.aws_client import AWSClientManager
 from src.utils.metrics import MetricsCollector
 from src.utils.logging_config import setup_logging, get_logger
 
 
-class AIAgentsApplication:
+class InfraAutomationApplication:
     """
-    Main application class for AI Agents.
+    Main application class for Infrastructure Automation Agents.
     """
     
     def __init__(self, config_path: Optional[str] = None):
