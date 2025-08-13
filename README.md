@@ -28,26 +28,33 @@ This project implements AI agents that automate infrastructure management using:
 ## 📁 Project Structure
 
 ```
-aws-ai-agents/
+ai-infrastructure-control-plane/
 ├── src/
 │   ├── agents/                 # Core AI agent implementations
-│   │   ├── scaling_agent.py
-│   │   ├── recovery_agent.py
-│   │   └── diagnostics_agent.py
+│   │   ├── base_agent.py       # Base agent framework
+│   │   └── scaling_agent.py    # Intelligent scaling agent
 │   ├── control_plane/          # Control plane orchestration
-│   │   ├── orchestrator.py
-│   │   ├── decision_engine.py
-│   │   └── state_manager.py
+│   │   └── orchestrator.py     # Multi-agent coordination
 │   ├── event_handlers/         # Event processing logic
-│   │   ├── cloudwatch_handler.py
-│   │   ├── autoscaling_handler.py
-│   │   └── health_check_handler.py
+│   │   └── cloudwatch_handler.py
 │   └── utils/                  # Shared utilities
-│       ├── aws_client.py
-│       ├── metrics.py
-│       └── logging_config.py
-├── infrastructure/             # Infrastructure as Code
-│   ├── cloudformation/
+│       ├── aws_client.py       # AWS SDK management
+│       ├── metrics.py          # Metrics collection
+│       └── logging_config.py   # Centralized logging
+├── aws/                        # AWS Infrastructure Components
+│   ├── cloudformation/         # Infrastructure as Code
+│   │   ├── main.yaml          # Complete infrastructure stack
+│   │   └── simple.yaml        # Simplified deployment
+│   ├── lambda/                # Lambda functions
+│   │   └── lambda_handler.py  # Serverless handler
+│   ├── config/                # AWS configurations
+│   │   └── aws_config.yaml    # Service settings
+│   ├── deployment/            # Deployment artifacts
+│   └── deploy.py              # Automated deployment
+├── config/
+│   └── agents_config.yaml     # Agent configurations
+├── tests/                     # Test suite
+└── docs/                      # Documentation
 │   ├── terraform/
 │   └── cdk/
 ├── config/                     # Configuration files
