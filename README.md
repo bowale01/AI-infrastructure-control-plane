@@ -175,13 +175,6 @@ Use flake8 for linting:
 flake8 src/ tests/
 ```
 
-## 📚 Documentation
-
-- [Agent Architecture](docs/architecture.md)
-- [Event Processing](docs/event-processing.md)
-- [Configuration Guide](docs/configuration.md)
-- [API Reference](docs/api-reference.md)
-
 ## 🤝 Contributing
 
 1. Fork the repository
